@@ -2,13 +2,13 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
   pull_request:
-    branches: ['main']
+    branches: ["main"]
 
 env:
-  ACTIONLINT_VERSION: '1.7.12'  # renovate: datasource=github-releases depName=rhysd/actionlint
-  PYFLAKES_VERSION: '3.4.0'     # renovate: datasource=pypi depName=pyflakes
+  ACTIONLINT_VERSION: "1.7.12" # renovate: datasource=github-releases depName=rhysd/actionlint
+  PYFLAKES_VERSION: "3.4.0" # renovate: datasource=pypi depName=pyflakes
 
 jobs:
   shellcheck:
@@ -22,6 +22,25 @@ jobs:
 
       - name: Run shellcheck
         run: shellcheck scripts/sign.sh
+
+  psscriptanalyzer:
+    name: Lint PowerShell scripts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path scripts/sign.ps1 -Severity Error,Warning
+          if ($results) {
+            $results | Format-List
+            exit 1
+          }
 
   pyflakes:
     name: Lint Python scripts
@@ -79,6 +98,66 @@ jobs:
             exit 1
           }
           echo "Smoke test passed ✓"
+
+  smoke-test-windows:
+    name: Smoke test Windows (mock server)
+    runs-on: windows-latest
+    needs: [psscriptanalyzer, pyflakes]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start mock signing server
+        shell: pwsh
+        run: |
+          # Use -WindowStyle Hidden (NOT -NoNewWindow) so the Python process gets
+          # its own console and is not killed when this step's pwsh.exe exits.
+          # With -NoNewWindow the child inherits the step's Windows Job Object
+          # and is terminated when the step ends.
+          Start-Process python3 `
+            -ArgumentList @('scripts/mock-server.py', '--host', '127.0.0.1', '--port', '16973', '--secret', 'test-secret-value') `
+            -WindowStyle Hidden
+          # Retry until the server is accepting connections.
+          # Python startup on Windows can be slow (Store shim indirection).
+          $retries = 0
+          do {
+            Start-Sleep -Seconds 1
+            $retries++
+            & curl.exe -sf http://127.0.0.1:16973/ 2>&1 | Out-Null
+          } while ($LASTEXITCODE -ne 0 -and $retries -lt 15)
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Mock server did not come up after $retries seconds"
+          }
+          Write-Output "Mock server is up (after ${retries}s)"
+
+      - name: Create test artifact
+        shell: pwsh
+        run: |
+          "fake binary content" | Set-Content -Path "$env:RUNNER_TEMP\test-artifact.bin" -NoNewline
+
+      - name: Run action (sign test artifact)
+        id: sign
+        uses: ./
+        with:
+          url: http://127.0.0.1:16973
+          api-key-secret: test-secret-value
+          profile: test-profile
+          file: ${{ runner.temp }}\test-artifact.bin
+          output: ${{ runner.temp }}\test-artifact-signed.bin
+
+      - name: Verify output exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:RUNNER_TEMP\test-artifact-signed.bin")) {
+            Write-Output '::error::Signed artifact not found'
+            exit 1
+          }
+          Write-Output "signed-file output: ${{ steps.sign.outputs.signed-file }}"
+          if ([string]::IsNullOrEmpty("${{ steps.sign.outputs.signed-file }}")) {
+            Write-Output '::error::signed-file output is empty'
+            exit 1
+          }
+          Write-Output 'Smoke test passed ✓'
 
   actionlint:
     name: Lint workflow files

@@ -39,12 +39,13 @@ inputs:
 outputs:
   signed-file:
     description: 'Path to the signed artifact.'
-    value: ${{ steps.sign.outputs.signed-file }}
+    value: ${{ steps.sign.outputs.signed-file || steps.sign-windows.outputs.signed-file }}
 
 runs:
   using: 'composite'
   steps:
     - name: Check required tools
+      if: runner.os != 'Windows'
       shell: bash
       run: |
         missing=0
@@ -58,6 +59,7 @@ runs:
 
     - name: Sign artifact
       id: sign
+      if: runner.os != 'Windows'
       shell: bash
       env:
         OSSLSIGN_URL: ${{ inputs.url }}
@@ -67,3 +69,29 @@ runs:
         OSSLSIGN_OUTPUT: ${{ inputs.output }}
         OSSLSIGN_TIMEOUT: ${{ inputs.timeout }}
       run: ${{ github.action_path }}/scripts/sign.sh
+
+    - name: Check required tools (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $missing = $false
+        foreach ($tool in @('curl.exe')) {
+          if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+            Write-Output "::error::Required tool not found: $tool"
+            $missing = $true
+          }
+        }
+        if ($missing) { exit 1 }
+
+    - name: Sign artifact (Windows)
+      id: sign-windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        OSSLSIGN_URL: ${{ inputs.url }}
+        OSSLSIGN_SECRET: ${{ inputs.api-key-secret }}
+        OSSLSIGN_PROFILE: ${{ inputs.profile }}
+        OSSLSIGN_FILE: ${{ inputs.file }}
+        OSSLSIGN_OUTPUT: ${{ inputs.output }}
+        OSSLSIGN_TIMEOUT: ${{ inputs.timeout }}
+      run: ${{ github.action_path }}/scripts/sign.ps1

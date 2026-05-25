@@ -7,13 +7,14 @@ A GitHub Action that signs a built artifact by calling a running
 
 ## Requirements
 
-| Tool | Notes |
-|------|-------|
-| `curl` | Pre-installed on `ubuntu-*` and `macos-*` runners |
-| `openssl` | Pre-installed on `ubuntu-*` and `macos-*` runners |
+| Tool | Runner | Notes |
+|------|--------|-------|
+| `curl` | `ubuntu-*`, `macos-*` | Pre-installed |
+| `openssl` | `ubuntu-*`, `macos-*` | Pre-installed |
+| `curl.exe` | `windows-*` | Pre-installed (Windows 10+ / Server 2019+) |
 
-> **Windows runners are not supported**, use a Linux or macOS runner, or add
-> a step that installs the required tools (e.g. Git Bash, WSL, or Cygwin).
+> [!TIP]
+> On Windows, HMAC-SHA256 signing uses the .NET `System.Security.Cryptography` API, so `openssl.exe` is **not** required on Windows.
 
 ## Quick start
 
