@@ -1,0 +1,69 @@
+name: 'Sign with osslsignserver'
+description: 'Sign an artifact by calling a running osslsignserver instance via its REST API'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  url:
+    description: >
+      Base URL of the osslsignserver instance, e.g. https://sign.example.com.
+      The action appends /v1/sign automatically.
+    required: true
+  api-key-secret:
+    description: >
+      HMAC shared secret used to sign requests. Must match the value in the
+      server's apiKeyHMACSecret file. Store this in a GitHub Actions secret.
+    required: true
+  profile:
+    description: >
+      Signing profile name configured on the server (e.g. "windows-release").
+    required: true
+  file:
+    description: >
+      Path to the artifact to sign (relative to GITHUB_WORKSPACE or absolute).
+    required: true
+  output:
+    description: >
+      Output path for the signed artifact. Defaults to overwriting the input
+      file in-place.
+    required: false
+    default: ''
+  timeout:
+    description: >
+      Maximum time in seconds to wait for the signing request to complete.
+    required: false
+    default: '120'
+
+outputs:
+  signed-file:
+    description: 'Path to the signed artifact.'
+    value: ${{ steps.sign.outputs.signed-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check required tools
+      shell: bash
+      run: |
+        missing=0
+        for tool in curl openssl; do
+          if ! command -v "$tool" >/dev/null 2>&1; then
+            echo "::error::Required tool not found: $tool"
+            missing=1
+          fi
+        done
+        [ "$missing" -eq 0 ] || exit 1
+
+    - name: Sign artifact
+      id: sign
+      shell: bash
+      env:
+        OSSLSIGN_URL: ${{ inputs.url }}
+        OSSLSIGN_SECRET: ${{ inputs.api-key-secret }}
+        OSSLSIGN_PROFILE: ${{ inputs.profile }}
+        OSSLSIGN_FILE: ${{ inputs.file }}
+        OSSLSIGN_OUTPUT: ${{ inputs.output }}
+        OSSLSIGN_TIMEOUT: ${{ inputs.timeout }}
+      run: ${{ github.action_path }}/scripts/sign.sh

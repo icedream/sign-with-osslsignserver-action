@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['main']
+
+env:
+  ACTIONLINT_VERSION: '1.7.12'  # renovate: datasource=github-releases depName=rhysd/actionlint
+  PYFLAKES_VERSION: '3.4.0'     # renovate: datasource=pypi depName=pyflakes
+
+jobs:
+  shellcheck:
+    name: Lint shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: shellcheck scripts/sign.sh
+
+  pyflakes:
+    name: Lint Python scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pyflakes
+        run: pip install "pyflakes==${PYFLAKES_VERSION}" --quiet
+
+      - name: Run pyflakes
+        run: python3 -m pyflakes scripts/mock-server.py
+
+  smoke-test:
+    name: Smoke test (mock server)
+    runs-on: ubuntu-latest
+    needs: [shellcheck, pyflakes]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Spin up the mock server from scripts/mock-server.py.
+      # The same script can be run manually from a local checkout.
+      - name: Start mock signing server
+        run: |
+          python3 scripts/mock-server.py --host 127.0.0.1 --port 16973 \
+            --secret test-secret-value &
+          # Give the server a moment to start
+          sleep 1
+          curl -sf http://127.0.0.1:16973/ | grep -q "osslsignserver mock"
+          echo "Mock server is up"
+
+      - name: Create test artifact
+        run: echo "fake binary content" > /tmp/test-artifact.bin
+
+      - name: Run action (sign test artifact)
+        id: sign
+        uses: ./
+        with:
+          url: http://127.0.0.1:16973
+          api-key-secret: test-secret-value
+          profile: test-profile
+          file: /tmp/test-artifact.bin
+          output: /tmp/test-artifact-signed.bin
+
+      - name: Verify output exists
+        run: |
+          [ -f /tmp/test-artifact-signed.bin ] || {
+            echo "::error::Signed artifact not found"
+            exit 1
+          }
+          echo "signed-file output: ${{ steps.sign.outputs.signed-file }}"
+          [ -n "${{ steps.sign.outputs.signed-file }}" ] || {
+            echo "::error::signed-file output is empty"
+            exit 1
+          }
+          echo "Smoke test passed ✓"
+
+  actionlint:
+    name: Lint workflow files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: |
+          curl -sL \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz actionlint
+          sudo mv actionlint /usr/local/bin/
+
+      - name: Run actionlint
+        run: actionlint
