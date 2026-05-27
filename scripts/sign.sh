@@ -102,18 +102,29 @@ echo "  Output   : $OUTPUT"
 TMP_RESPONSE=$(mktemp)
 trap 'rm -f "$TMP_RESPONSE"' EXIT
 
-HTTP_STATUS=$(curl \
-  --silent \
-  --show-error \
-  --max-time "$TIMEOUT" \
-  --output "$TMP_RESPONSE" \
-  --write-out '%{http_code}' \
-  -H "X-Timestamp: $TIMESTAMP" \
-  -H "X-Request-ID: $REQUEST_ID" \
-  -H "X-Request-Signature: $SIGNATURE" \
-  -F "profile=$OSSLSIGN_PROFILE" \
-  -F "file=@$OSSLSIGN_FILE" \
-  "$ENDPOINT") || {
+# Build curl command with optional description parameters
+CURL_ARGS=(
+  --silent
+  --show-error
+  --max-time "$TIMEOUT"
+  --output "$TMP_RESPONSE"
+  --write-out '%{http_code}'
+  -H "X-Timestamp: $TIMESTAMP"
+  -H "X-Request-ID: $REQUEST_ID"
+  -H "X-Request-Signature: $SIGNATURE"
+  -F "profile=$OSSLSIGN_PROFILE"
+  -F "file=@$OSSLSIGN_FILE"
+)
+
+# Add optional description fields if provided
+if [ -n "$OSSLSIGN_DESCRIPTION" ]; then
+  CURL_ARGS+=(-F "description=$OSSLSIGN_DESCRIPTION")
+fi
+if [ -n "$OSSLSIGN_DESCRIPTION_URL" ]; then
+  CURL_ARGS+=(-F "description_url=$OSSLSIGN_DESCRIPTION_URL")
+fi
+
+HTTP_STATUS=$(curl "${CURL_ARGS[@]}" "$ENDPOINT") || {
   echo "::endgroup::"
   echo "::error::curl failed — check the server URL and network connectivity"
   exit 1

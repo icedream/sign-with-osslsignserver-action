@@ -35,6 +35,17 @@ inputs:
       Maximum time in seconds to wait for the signing request to complete.
     required: false
     default: '120'
+  description:
+    description: >
+      Optional text description for the signature.
+      Appears in Windows UAC dialogs and signature verification tools.
+    required: false
+    default: ''
+  description-url:
+    description: >
+      Optional URL to be associated with the signature description.
+    required: false
+    default: ''
 
 outputs:
   signed-file:
@@ -68,6 +79,8 @@ runs:
         OSSLSIGN_FILE: ${{ inputs.file }}
         OSSLSIGN_OUTPUT: ${{ inputs.output }}
         OSSLSIGN_TIMEOUT: ${{ inputs.timeout }}
+        OSSLSIGN_DESCRIPTION: ${{ inputs.description }}
+        OSSLSIGN_DESCRIPTION_URL: ${{ inputs.description-url }}
       run: ${{ github.action_path }}/scripts/sign.sh
 
     - name: Check required tools (Windows)
@@ -94,4 +107,6 @@ runs:
         OSSLSIGN_FILE: ${{ inputs.file }}
         OSSLSIGN_OUTPUT: ${{ inputs.output }}
         OSSLSIGN_TIMEOUT: ${{ inputs.timeout }}
+        OSSLSIGN_DESCRIPTION: ${{ inputs.description }}
+        OSSLSIGN_DESCRIPTION_URL: ${{ inputs.description-url }}
       run: ${{ github.action_path }}/scripts/sign.ps1

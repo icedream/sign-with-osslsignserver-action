@@ -87,18 +87,31 @@ Write-Output "  Output   : $Output"
 # Write response body to a temp file so we can check the HTTP status
 $TmpResponse = [System.IO.Path]::GetTempFileName()
 try {
-    $HttpStatus = & curl.exe `
-        --silent `
-        --show-error `
-        --max-time $Timeout `
-        --output $TmpResponse `
-        --write-out '%{http_code}' `
-        -H "X-Timestamp: $Timestamp" `
-        -H "X-Request-ID: $RequestId" `
-        -H "X-Request-Signature: $Signature" `
-        -F "profile=$($env:OSSLSIGN_PROFILE)" `
-        -F "file=@$($env:OSSLSIGN_FILE)" `
-        $Endpoint
+    # Build curl arguments
+    $CurlArgs = @(
+        '--silent',
+        '--show-error',
+        '--max-time', $Timeout,
+        '--output', $TmpResponse,
+        '--write-out', '%{http_code}',
+        '-H', "X-Timestamp: $Timestamp",
+        '-H', "X-Request-ID: $RequestId",
+        '-H', "X-Request-Signature: $Signature",
+        '-F', "profile=$($env:OSSLSIGN_PROFILE)",
+        '-F', "file=@$($env:OSSLSIGN_FILE)"
+    )
+    
+    # Add optional description fields if provided
+    if (-not [string]::IsNullOrEmpty($env:OSSLSIGN_DESCRIPTION)) {
+        $CurlArgs += @('-F', "description=$($env:OSSLSIGN_DESCRIPTION)")
+    }
+    if (-not [string]::IsNullOrEmpty($env:OSSLSIGN_DESCRIPTION_URL)) {
+        $CurlArgs += @('-F', "description_url=$($env:OSSLSIGN_DESCRIPTION_URL)")
+    }
+    
+    $CurlArgs += $Endpoint
+    
+    $HttpStatus = & curl.exe @CurlArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Output '::endgroup::'
         Write-Output '::error::curl failed - check the server URL and network connectivity'
