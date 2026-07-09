@@ -15,17 +15,25 @@
 set -eo pipefail
 
 # ---------------------------------------------------------------------------
+# Validate required inputs (check all at once and report all missing)
+# ---------------------------------------------------------------------------
+MISSING_VARS=""
+
+for VAR in OSSLSIGN_URL OSSLSIGN_SECRET OSSLSIGN_PROFILE OSSLSIGN_FILE; do
+  if [ -z "${!VAR}" ]; then
+    MISSING_VARS="${MISSING_VARS:+$MISSING_VARS, }$VAR"
+  fi
+done
+
+if [ -n "$MISSING_VARS" ]; then
+  echo "::error::Missing required environment variable(s): $MISSING_VARS"
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Mask the secret immediately so it never appears in logs
 # ---------------------------------------------------------------------------
 echo "::add-mask::${OSSLSIGN_SECRET}"
-
-# ---------------------------------------------------------------------------
-# Validate required inputs
-# ---------------------------------------------------------------------------
-: "${OSSLSIGN_URL:?OSSLSIGN_URL must be set}"
-: "${OSSLSIGN_SECRET:?OSSLSIGN_SECRET must be set}"
-: "${OSSLSIGN_PROFILE:?OSSLSIGN_PROFILE must be set}"
-: "${OSSLSIGN_FILE:?OSSLSIGN_FILE must be set}"
 
 TIMEOUT="${OSSLSIGN_TIMEOUT:-120}"
 

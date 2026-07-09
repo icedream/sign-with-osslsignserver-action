@@ -14,19 +14,24 @@
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------------------
+# Validate required inputs (check all at once and report all missing)
+# ---------------------------------------------------------------------------
+$MissingVars = @()
+foreach ($var in @('OSSLSIGN_URL', 'OSSLSIGN_SECRET', 'OSSLSIGN_PROFILE', 'OSSLSIGN_FILE')) {
+    if ([string]::IsNullOrEmpty((Get-Item "Env:$var" -ErrorAction SilentlyContinue).Value)) {
+        $MissingVars += $var
+    }
+}
+
+if ($MissingVars.Count -gt 0) {
+    Write-Output "::error::Missing required environment variable(s): $($MissingVars -join ', ')"
+    exit 1
+}
+
+# ---------------------------------------------------------------------------
 # Mask the secret immediately so it never appears in logs
 # ---------------------------------------------------------------------------
 Write-Output "::add-mask::$($env:OSSLSIGN_SECRET)"
-
-# ---------------------------------------------------------------------------
-# Validate required inputs
-# ---------------------------------------------------------------------------
-foreach ($var in @('OSSLSIGN_URL', 'OSSLSIGN_SECRET', 'OSSLSIGN_PROFILE', 'OSSLSIGN_FILE')) {
-    if ([string]::IsNullOrEmpty((Get-Item "Env:$var" -ErrorAction SilentlyContinue).Value)) {
-        Write-Output "::error::$var must be set"
-        exit 1
-    }
-}
 
 $Timeout = if ($env:OSSLSIGN_TIMEOUT) { $env:OSSLSIGN_TIMEOUT } else { '120' }
 
