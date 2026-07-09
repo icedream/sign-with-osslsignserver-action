@@ -84,55 +84,99 @@ Write-Output "  Request  : $RequestId"
 Write-Output "  Timestamp: $Timestamp"
 Write-Output "  Output   : $Output"
 
-# Write response body to a temp file so we can check the HTTP status
+# Write response body and headers to temp files for retry logic
 $TmpResponse = [System.IO.Path]::GetTempFileName()
-try {
-    # Build curl arguments
+$TmpHeaders = [System.IO.Path]::GetTempFileName()
+
+function Send-Request {
+    param(
+        [string]$Endpoint,
+        [string]$Timestamp,
+        [string]$RequestId,
+        [string]$Signature,
+        [string]$SigningProfile,
+        [string]$File,
+        [string]$Timeout,
+        [string]$Description,
+        [string]$DescriptionUrl,
+        [string]$ResponseFile,
+        [string]$HeadersFile
+    )
+
     $CurlArgs = @(
         '--silent',
         '--show-error',
         '--max-time', $Timeout,
-        '--output', $TmpResponse,
+        '--output', $ResponseFile,
         '--write-out', '%{http_code}',
+        '--dump-header', $HeadersFile,
         '-H', "X-Timestamp: $Timestamp",
         '-H', "X-Request-ID: $RequestId",
         '-H', "X-Request-Signature: $Signature",
-        '-F', "profile=$($env:OSSLSIGN_PROFILE)",
-        '-F', "file=@$($env:OSSLSIGN_FILE)"
+        '-F', "profile=$SigningProfile",
+        '-F', "file=@$File"
     )
-    
-    # Add optional description fields if provided
-    if (-not [string]::IsNullOrEmpty($env:OSSLSIGN_DESCRIPTION)) {
-        $CurlArgs += @('-F', "description=$($env:OSSLSIGN_DESCRIPTION)")
+
+    if (-not [string]::IsNullOrEmpty($Description)) {
+        $CurlArgs += @('-F', "description=$Description")
     }
-    if (-not [string]::IsNullOrEmpty($env:OSSLSIGN_DESCRIPTION_URL)) {
-        $CurlArgs += @('-F', "description_url=$($env:OSSLSIGN_DESCRIPTION_URL)")
+    if (-not [string]::IsNullOrEmpty($DescriptionUrl)) {
+        $CurlArgs += @('-F', "description_url=$DescriptionUrl")
     }
-    
+
     $CurlArgs += $Endpoint
-    
+
     $HttpStatus = & curl.exe @CurlArgs
-    if ($LASTEXITCODE -ne 0) {
+    return $HttpStatus
+}
+
+$RetryCount = 0
+$MaxRetries = 10
+$RetryDelay = 1
+
+while ($RetryCount -lt $MaxRetries) {
+    $HttpStatus = Send-Request -Endpoint $Endpoint -Timestamp $Timestamp -RequestId $RequestId -Signature $Signature -SigningProfile $OSSLSIGN_PROFILE -File $OSSLSIGN_FILE -Timeout $Timeout -Description $OSSLSIGN_DESCRIPTION -DescriptionUrl $OSSLSIGN_DESCRIPTION_URL -ResponseFile $TmpResponse -HeadersFile $TmpHeaders
+
+    $RetryCount++
+    Write-Output "  Attempt $RetryCount/$MaxRetries - HTTP $HttpStatus"
+
+    if ($HttpStatus -eq '200') {
         Write-Output '::endgroup::'
-        Write-Output '::error::curl failed - check the server URL and network connectivity'
-        exit 1
+        break
     }
-} catch {
+
+    if ($HttpStatus -eq '503' -or $HttpStatus -eq '504') {
+        # Extract Retry-After header if present
+        $RetryAfter = ''
+        if (Test-Path $TmpHeaders) {
+            $RetryAfter = (Select-String -Path $TmpHeaders -Pattern 'Retry-After:\s*(\d+)').Matches.Groups[1].Value
+        }
+
+        if ([int]$RetryAfter -gt 0) {
+            $RetryDelay = [int]$RetryAfter
+        } else {
+            $RetryDelay = $RetryDelay * 2
+            if ($RetryDelay -gt 60) { $RetryDelay = 60 }
+        }
+
+        Write-Output "  Retrying in ${RetryDelay}s (503/504)"
+        Start-Sleep -Seconds $RetryDelay
+        $RetryDelay = $RetryDelay * 2
+        if ($RetryDelay -gt 60) { $RetryDelay = 60 }
+        continue
+    }
+
     Write-Output '::endgroup::'
-    Write-Output "::error::curl failed - $_"
+    Write-Output "::error::Signing failed with HTTP $HttpStatus"
+    Write-Output 'Server response:'
+    Get-Content -LiteralPath $TmpResponse -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $TmpResponse -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $TmpHeaders -ErrorAction SilentlyContinue
     exit 1
 }
 
 Write-Output "  HTTP status: $HttpStatus"
 Write-Output '::endgroup::'
-
-if ($HttpStatus -ne '200') {
-    Write-Output "::error::Signing failed with HTTP $HttpStatus"
-    Write-Output 'Server response:'
-    Get-Content -LiteralPath $TmpResponse -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $TmpResponse -ErrorAction SilentlyContinue
-    exit 1
-}
 
 # Move the signed artifact to the desired output path
 if ($TmpResponse -ne $Output) {

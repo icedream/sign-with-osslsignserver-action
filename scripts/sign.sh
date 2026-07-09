@@ -88,7 +88,7 @@ SIGNATURE=$(printf 'POST\n/v1/sign\n%s\n%s\n%s\n%s\n' \
   awk '{print $NF}')
 
 # ---------------------------------------------------------------------------
-# Send the signing request
+# Send the signing request with retry logic for 503/504
 # ---------------------------------------------------------------------------
 echo "::group::Signing $OSSLSIGN_FILE"
 echo "  Endpoint : $ENDPOINT"
@@ -98,49 +98,89 @@ echo "  Request  : $REQUEST_ID"
 echo "  Timestamp: $TIMESTAMP"
 echo "  Output   : $OUTPUT"
 
-# Write response body to a temp file so we can check the HTTP status
+# Write response body and headers to temp files for retry logic
 TMP_RESPONSE=$(mktemp)
-trap 'rm -f "$TMP_RESPONSE"' EXIT
+TMP_HEADERS=$(mktemp)
+trap 'rm -f "$TMP_RESPONSE" "$TMP_HEADERS"' EXIT
 
-# Build curl command with optional description parameters
-CURL_ARGS=(
-  --silent
-  --show-error
-  --max-time "$TIMEOUT"
-  --output "$TMP_RESPONSE"
-  --write-out '%{http_code}'
-  -H "X-Timestamp: $TIMESTAMP"
-  -H "X-Request-ID: $REQUEST_ID"
-  -H "X-Request-Signature: $SIGNATURE"
-  -F "profile=$OSSLSIGN_PROFILE"
-  -F "file=@$OSSLSIGN_FILE"
-)
+RETRY_COUNT=0
+MAX_RETRIES=10
+RETRY_DELAY=1
 
-# Add optional description fields if provided
-if [ -n "$OSSLSIGN_DESCRIPTION" ]; then
-  CURL_ARGS+=(-F "description=$OSSLSIGN_DESCRIPTION")
-fi
-if [ -n "$OSSLSIGN_DESCRIPTION_URL" ]; then
-  CURL_ARGS+=(-F "description_url=$OSSLSIGN_DESCRIPTION_URL")
-fi
+send_request() {
+  local args=(
+    --silent
+    --show-error
+    --max-time "$TIMEOUT"
+    --output "$TMP_RESPONSE"
+    --write-out '%{http_code}'
+    --dump-header "$TMP_HEADERS"
+    -H "X-Timestamp: $TIMESTAMP"
+    -H "X-Request-ID: $REQUEST_ID"
+    -H "X-Request-Signature: $SIGNATURE"
+    -F "profile=$OSSLSIGN_PROFILE"
+    -F "file=@$OSSLSIGN_FILE"
+  )
 
-HTTP_STATUS=$(curl "${CURL_ARGS[@]}" "$ENDPOINT") || {
-  echo "::endgroup::"
-  echo "::error::curl failed — check the server URL and network connectivity"
-  exit 1
+  # Add optional description fields if provided
+  if [ -n "$OSSLSIGN_DESCRIPTION" ]; then
+    args+=(-F "description=$OSSLSIGN_DESCRIPTION")
+  fi
+  if [ -n "$OSSLSIGN_DESCRIPTION_URL" ]; then
+    args+=(-F "description_url=$OSSLSIGN_DESCRIPTION_URL")
+  fi
+
+  args+=("$ENDPOINT")
+
+  curl "${args[@]}"
 }
 
-echo "  HTTP status: $HTTP_STATUS"
-echo "::endgroup::"
+while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
+  HTTP_STATUS=$(send_request) || {
+    echo "::endgroup::"
+    echo "::error::curl failed — check the server URL and network connectivity"
+    exit 1
+  }
 
-if [ "$HTTP_STATUS" != "200" ]; then
+  RETRY_COUNT=$((RETRY_COUNT + 1))
+  echo "  Attempt $RETRY_COUNT/$MAX_RETRIES - HTTP $HTTP_STATUS"
+
+  if [ "$HTTP_STATUS" = "200" ]; then
+    echo "::endgroup::"
+    break
+  fi
+
+  if [ "$HTTP_STATUS" = "503" ] || [ "$HTTP_STATUS" = "504" ]; then
+    # Extract Retry-After header if present
+    RETRY_AFTER=""
+    if [ -f "$TMP_HEADERS" ]; then
+      RETRY_AFTER=$(grep -i 'retry-after' "$TMP_HEADERS" | awk '{print $2}' | tr -d '\r')
+    fi
+
+    if [ -n "$RETRY_AFTER" ] && [ "$RETRY_AFTER" -gt 0 ] 2>/dev/null; then
+      RETRY_DELAY="$RETRY_AFTER"
+    else
+      RETRY_DELAY=$((RETRY_DELAY * 2))
+      [ "$RETRY_DELAY" -gt 60 ] && RETRY_DELAY=60
+    fi
+
+    echo "  Retrying in ${RETRY_DELAY}s (503/504)"
+    sleep "$RETRY_DELAY"
+    RETRY_DELAY=$((RETRY_DELAY * 2))
+    [ "$RETRY_DELAY" -gt 60 ] && RETRY_DELAY=60
+    continue
+  fi
+
+  echo "::endgroup::"
   echo "::error::Signing failed with HTTP $HTTP_STATUS"
   # Print response body (likely a JSON error) without leaking secrets
   echo "Server response:"
   cat "$TMP_RESPONSE" 2>/dev/null || true
   echo
   exit 1
-fi
+done
+
+echo "  HTTP status: $HTTP_STATUS"
 
 # Move the signed artifact to the desired output path
 if [ "$TMP_RESPONSE" != "$OUTPUT" ]; then
