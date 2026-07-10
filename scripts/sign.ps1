@@ -135,7 +135,7 @@ $MaxRetries = 10
 $RetryDelay = 1
 
 while ($RetryCount -lt $MaxRetries) {
-    $HttpStatus = Send-Request -Endpoint $Endpoint -Timestamp $Timestamp -RequestId $RequestId -Signature $Signature -SigningProfile $OSSLSIGN_PROFILE -File $OSSLSIGN_FILE -Timeout $Timeout -Description $OSSLSIGN_DESCRIPTION -DescriptionUrl $OSSLSIGN_DESCRIPTION_URL -ResponseFile $TmpResponse -HeadersFile $TmpHeaders
+    $HttpStatus = Send-Request -Endpoint $Endpoint -Timestamp $Timestamp -RequestId $RequestId -Signature $Signature -SigningProfile $env:OSSLSIGN_PROFILE -File $env:OSSLSIGN_FILE -Timeout $Timeout -Description $env:OSSLSIGN_DESCRIPTION -DescriptionUrl $env:OSSLSIGN_DESCRIPTION_URL -ResponseFile $TmpResponse -HeadersFile $TmpHeaders
 
     $RetryCount++
     Write-Output "  Attempt $RetryCount/$MaxRetries - HTTP $HttpStatus"
