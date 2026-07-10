@@ -147,22 +147,21 @@ while ($RetryCount -lt $MaxRetries) {
 
     if ($HttpStatus -eq '503' -or $HttpStatus -eq '504') {
         # Extract Retry-After header if present
-        $RetryAfter = ''
-        if (Test-Path $TmpHeaders) {
-            $RetryAfter = (Select-String -Path $TmpHeaders -Pattern 'Retry-After:\s*(\d+)').Matches.Groups[1].Value
-        }
+        $RetryDelay = $RetryDelay * 2
+        if ($RetryDelay -gt 60) { $RetryDelay = 60 }
 
-        if ([int]$RetryAfter -gt 0) {
-            $RetryDelay = [int]$RetryAfter
-        } else {
-            $RetryDelay = $RetryDelay * 2
-            if ($RetryDelay -gt 60) { $RetryDelay = 60 }
+        if (Test-Path $TmpHeaders) {
+            $RetryAfterMatch = Select-String -Path $TmpHeaders -Pattern 'Retry-After:\s*(\d+)'
+            if ($RetryAfterMatch.Success) {
+                $parsed = [int]$RetryAfterMatch.Matches.Groups[1].Value
+                if ($parsed -gt 0 -and $parsed -gt $RetryDelay) {
+                    $RetryDelay = $parsed
+                }
+            }
         }
 
         Write-Output "  Retrying in ${RetryDelay}s (503/504)"
         Start-Sleep -Seconds $RetryDelay
-        $RetryDelay = $RetryDelay * 2
-        if ($RetryDelay -gt 60) { $RetryDelay = 60 }
         continue
     }
 
