@@ -154,7 +154,7 @@ while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
     # Extract Retry-After header if present
     RETRY_AFTER=""
     if [ -f "$TMP_HEADERS" ]; then
-      RETRY_AFTER=$(grep -i 'retry-after' "$TMP_HEADERS" | awk '{print $2}' | tr -d '\r')
+      RETRY_AFTER=$(grep -i 'retry-after' "$TMP_HEADERS" | awk '{print $2}' | tr -d '\r') || true
     fi
 
     if [ -n "$RETRY_AFTER" ] && [ "$RETRY_AFTER" -gt 0 ] 2>/dev/null; then
